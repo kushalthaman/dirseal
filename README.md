@@ -1,6 +1,6 @@
 dirseal is a deterministic directory packer. it turns a directory into a reproducible tar.zst snapshot while honoring `.gitignore` and custom globs, embeds a manifest (with paths and blake3 hashes) and names the artifact by its content tree-hash. i use it for reliable build caching, ci artifacts, content-addressed deploys, and quick verification/diffs.
 
-## installation & usage
+## installation & usage 
 
 ```bash
 cargo install --path .

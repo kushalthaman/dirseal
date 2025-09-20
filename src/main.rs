@@ -16,10 +16,10 @@ use serde::{Deserialize, Serialize};
 const MANIFEST_PATH: &str = "__DIRSEAL__/MANIFEST.json";
 const DEFAULT_FILE_MODE: u32 = 0o644;
 const DEFAULT_DIR_MODE: u32 = 0o755;
-const FIXED_MTIME: u64 = 0; // for deterministic tar headers
+const FIXED_MTIME: u64 = 0; 
 
 #[derive(Parser, Debug)]
-#[command(name = "dirseal", version, about = "Deterministic directory packer: tar.zst with BLAKE3 manifest, verify & diff")] 
+#[command(name = "dirseal", version, about = "dirseal: a deterministic directory packer")] 
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -27,51 +27,43 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Pack a directory into deterministic tar.zst with embedded manifest
+    /// pack a dir into tar.zst with embedded manifest
     Pack {
-        /// Directory to pack
         #[arg(default_value = ".")]
         root: PathBuf,
-        /// Output file or directory. If a directory, artifact is named by tree hash
+        /// output file or directory. if dir artifact is named by tree hash
         #[arg(short, long)]
         out: Option<PathBuf>,
-        /// Compression level (zstd), 1-22
         #[arg(short = 'l', long, default_value_t = 10)]
         level: i32,
-        /// Number of zstd threads (>=1). If >1, try to use multithreaded compression
+        /// no. of zstd threads (>=1). if multiple we try to use multithreaded compression
         #[arg(short = 't', long, default_value_t = 1)]
         threads: usize,
-        /// Additional include globs (higher precedence than exclude)
         #[arg(long, num_args = 0..)]
         include: Vec<String>,
-        /// Additional exclude globs
         #[arg(long, num_args = 0..)]
         exclude: Vec<String>,
-        /// Write a sidecar manifest json next to the artifact
         #[arg(long)]
         manifest_out: Option<PathBuf>,
-        /// Shorten the printed hash to this many hex chars (file name still uses full hash)
         #[arg(long, default_value_t = 12)]
         short: usize,
     },
-    /// Verify an archive's contents against its embedded manifest or a directory
+    /// verify archive's contents against its embedded manifest or a dir
     Verify {
-        /// Archive file (.tar.zst)
         archive: PathBuf,
-        /// Optional: verify against a directory by recomputing hashes
         #[arg(long)]
         against: Option<PathBuf>,
     },
-    /// Diff two sources: archive|dir vs archive|dir
+    /// diff two sources
     Diff {
         left: PathBuf,
         right: PathBuf,
     },
-    /// List entries from an archive (from its manifest)
+    /// list entries from an archive from its manifest
     List {
         archive: PathBuf,
     },
-    /// Compute tree hash for a directory, honoring ignore rules
+    /// compute tree hash for a dir honoring ignore rules
     Hash {
         #[arg(default_value = ".")]
         root: PathBuf,
@@ -250,7 +242,7 @@ fn collect_entries(root: &Path, include: &[String], exclude: &[String]) -> Resul
         let rel = path.strip_prefix(root).unwrap_or(path);
         let rel_str = normalize_sep(&rel.to_string_lossy());
 
-        // Ensure parent directories are tracked so we can preserve empty dirs
+        // parent directories are tracked so we can preserve empty dirs
         if let Some(parent) = rel.parent() { if !parent.as_os_str().is_empty() { dirs.insert(normalize_sep(&parent.to_string_lossy())); } }
 
         let ft = match dent.file_type() { Some(t) => t, None => continue };
@@ -262,12 +254,12 @@ fn collect_entries(root: &Path, include: &[String], exclude: &[String]) -> Resul
     files.sort_by(|a, b| a.0.cmp(&b.0));
     let mut entries: Vec<ManifestEntry> = Vec::new();
 
-    // Deterministically add directories first (sorted by BTreeSet)
+    // add dirs first sorted by BTreeSet
     for d in dirs.into_iter() {
         entries.push(ManifestEntry { path: d, kind: EntryKind::Dir, size: 0, mode: DEFAULT_DIR_MODE, hash: None, link_target: None });
     }
 
-    // Symlinks (sorted for determinism)
+    // symlinks sorted
     symlinks.sort_by(|a, b| a.0.cmp(&b.0));
     for (rel, p) in symlinks.into_iter() {
         let target = fs::read_link(&p).with_context(|| format!("reading symlink {}", p.display()))?;
@@ -276,7 +268,7 @@ fn collect_entries(root: &Path, include: &[String], exclude: &[String]) -> Resul
         entries.push(ManifestEntry { path: rel, kind: EntryKind::Symlink, size: 0, mode: 0o777, hash: Some(hash), link_target: Some(target_str) });
     }
 
-    // Files
+    // files
     for (rel, p) in files.into_iter() {
         let meta = fs::metadata(&p).with_context(|| format!("stat {}", p.display()))?;
         let size = meta.len();
@@ -325,7 +317,6 @@ fn compute_tree_hash(entries: &[ManifestEntry]) -> String {
 fn pack_dir(root: &Path, out: Option<&Path>, level: i32, threads: usize, include: &[String], exclude: &[String], manifest_out: Option<&Path>) -> Result<(Manifest, PathBuf)> {
     let manifest = build_manifest_from_dir(root, include, exclude)?;
 
-    // Resolve output path
     let artifact_path = match out {
         Some(p) if p.is_dir() => p.join(format!("dirseal-{}.tar.zst", manifest.tree_hash)),
         Some(p) if p.extension().and_then(|e| e.to_str()) == Some("zst") => p.to_path_buf(),
@@ -345,7 +336,6 @@ fn pack_dir(root: &Path, out: Option<&Path>, level: i32, threads: usize, include
     let mut builder = tar::Builder::new(encoder);
     builder.mode(tar::HeaderMode::Deterministic);
 
-    // Append directories
     for e in manifest.entries.iter().filter(|e| matches!(e.kind, EntryKind::Dir)) {
         let mut header = tar::Header::new_gnu();
         header.set_size(0);
@@ -357,7 +347,6 @@ fn pack_dir(root: &Path, out: Option<&Path>, level: i32, threads: usize, include
         builder.append_data(&mut header, Path::new(&e.path), io::empty()).with_context(|| format!("tar add dir {}", e.path))?;
     }
 
-    // Append symlinks
     for e in manifest.entries.iter().filter(|e| matches!(e.kind, EntryKind::Symlink)) {
         let mut header = tar::Header::new_gnu();
         header.set_size(0);
@@ -372,7 +361,6 @@ fn pack_dir(root: &Path, out: Option<&Path>, level: i32, threads: usize, include
         builder.append_data(&mut header, Path::new(&e.path), io::empty()).with_context(|| format!("tar add symlink {}", e.path))?;
     }
 
-    // Append files
     for e in manifest.entries.iter().filter(|e| matches!(e.kind, EntryKind::File)) {
         let src = root.join(&e.path);
         let mut header = tar::Header::new_gnu();
@@ -386,7 +374,6 @@ fn pack_dir(root: &Path, out: Option<&Path>, level: i32, threads: usize, include
         builder.append_data(&mut header, Path::new(&e.path), &mut f).with_context(|| format!("tar add file {}", e.path))?;
     }
 
-    // Append embedded manifest at the end (not part of tree hash)
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;
     let mut header = tar::Header::new_gnu();
     header.set_mtime(FIXED_MTIME);
@@ -397,7 +384,6 @@ fn pack_dir(root: &Path, out: Option<&Path>, level: i32, threads: usize, include
     header.set_size(manifest_json.len() as u64);
     builder.append_data(&mut header, Path::new(MANIFEST_PATH), &manifest_json[..]).context("tar add manifest")?;
 
-    // Finalize writers
     let encoder = builder.into_inner().context("finalize tar")?;
     let _file = encoder.finish().context("finalize zstd")?;
 
